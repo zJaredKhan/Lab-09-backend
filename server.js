@@ -7,9 +7,17 @@ const cors = require('cors');
 const superagent = require('superagent');
 const pg = require('pg');
 
+const timeOuts = {
+  weather: 15 * 1000,
+  meetups: 60 * 60 * 24 * 1000,
+  hiking: 30 * 60 * 60 * 24 * 1000
+}
+
 require('dotenv').config();
 
 const PORT = process.env.PORT || 3000;
+
+
 
 // App
 
@@ -23,44 +31,68 @@ client.connect();
 client.on('error', err => console.error(err));
 
 // New SQL for location
+function getLocation(request, response){
+  let searchHandler = {
+    cacheHit: (data) => {
+      console.log('from the database');
+      response.status(200).send(data);
+    },
+    cacheMiss: (query) => {
+      return searchLocation(query)
+        .then(result => {
+          response.send(result);
+        }).catch(err=>console.error(err));
+    }
+  }
+  lookForLocation(request.query.data, searchHandler);
+}
 
-app.get('/location', (request, response) => {
-  let query = request.query.data;
+app.get('/location', getLocation);
+
+function lookForLocation(query, handler) {
+  // let query = request.query.data;
   const SQL = 'SELECT * FROM locations WHERE search_query=$1';
   const values = [query];
   console.log(values);
   return client.query(SQL, values)
-
     .then(data => { //then if we have it, send it back
       if(data.rowCount){
         console.log('Location retrieved from database')
-        response.status(200).send(data.rows[0]);
+       handler.cacheHit(data.rows[0]);
       } else {//otherwise, get it from google
-        const URL = `https://maps.googleapis.com/maps/api/geocode/json?address=${query}&key=${process.env.GEOCODE_API_KEY}`;
-
-        return superagent.get(URL)
-          .then(result => {
-            console.log('Location retrieved from Google')
-
-            //then normalize it
-            let location = new Location(result.body.results[0]);
-            let SQL = `INSERT INTO locations (search_query, formatted_query, latitude, longitude) VALUES($1, $2, $3, $4)`;
-
-            //store it in our DB
-            return client.query(SQL, [query, location.formatted_query, location.latitude, location.longitude])
-              .then(() =>{
-
-                //then send it back
-                response.status(200).send(location);
-              })
-          })
+        handler.cacheMiss(query);
+      } 
+    }).catch(err => console.error(err));
       }
-    })
-    .catch(err => {
-      console.error(err);
-      response.send(err)
-    })
-})
+
+function searchLocation(query){
+  const URL = `https://maps.googleapis.com/maps/api/geocode/json?address=${query}&key=${process.env.GEOCODE_API_KEY}`;
+
+       return superagent.get(URL)
+         .then(result => {
+           console.log('Location retrieved from Google')
+
+           //then normalize it
+           let location = new Location(result.body.results[0]);
+           let SQL = `INSERT INTO locations (search_query, formatted_query, latitude, longitude) VALUES($1, $2, $3, $4) RETURNING id`;
+           
+
+           //store it in our DB
+           return client.query(SQL, [query, location.formatted_query, location.latitude, location.longitude])
+             .then((result) =>{
+               console.log(result);
+               console.log('stored to DB');
+               location.id = result.rows[0].id
+               return location;
+               //then send it back
+           
+   })
+   .catch(err => 
+     console.error(err));
+   
+   });
+}
+
 
 // New SQL for weather
 
@@ -213,7 +245,7 @@ app.get('/movies', (req, resp) => {
 });
 
 app.get('/*', function(req, resp){
-  resp.status(500).send('Don\'t look behind the curtain');
+  resp.status(500).send('Don\'t look behind the curtain!!!!!!!!');
 });
 
 // Global Variables
