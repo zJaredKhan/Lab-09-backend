@@ -10,7 +10,8 @@ const pg = require('pg');
 const timeOuts = {
   weather: 15 * 1000,
   meetups: 60 * 60 * 24 * 1000,
-  hiking: 30 * 60 * 60 * 24 * 1000
+  hiking: 30 * 60 * 60 * 24 * 1000,
+  yelp: 60 * 24 * 1000
 }
 
 require('dotenv').config();
@@ -97,84 +98,198 @@ function searchLocation(query){
 // New SQL for weather
 
 app.get('/weather', (request, response) => {
-  let SQL = 'SELECT * FROM  weathers WHERE location_id=$1';
-  let values = [request.query.data.id];
-  client.query(SQL, values)
+  searchWeather(request.query.data)
+  .then(forecastData => {
+    response.send(forecastData);
+  }).catch(err => {
+    console.log('HEY YOU!');
+    console.error(err);
+  })
+});
 
+function searchWeather(query){
+  const URL = `https://api.darksky.net/forecast/${process.env.DARKSKY_API_KEY}/${query.latitude},${query.longitude}`;
+
+  let SQL = 'SELECT * FROM  weathers WHERE location_id=$1';
+  // let values = [request.query.data.id];
+  return client.query(SQL, [query.id])
 
     .then(data =>{
-      if(data.rowCount > 0){ //cache hit
-        console.log('Weather retrieved from database')
-        response.status(200).send(data.rows);
-      } else { //cache miss
-        const URL = `https://api.darksky.net/forecast/${process.env.DARKSKY_API_KEY}/${request.query.data.latitude},${request.query.data.longitude}`;
-
+      if(!data.rowCount){ //cache hit
+        console.log('Weather retrieved from Api')
+       //cache miss
+        
         return superagent.get(URL)
-          .then( forecastData => {
-            let weeklyForecast = forecastData.body.daily.data.map( oneDay => {
-              let weatherObject = new Forecast(oneDay);
-              SQL = `INSERT INTO weathers (time, forecast, location_id) VALUES($1, $2, $3)`;
-              values = [weatherObject.time, weatherObject.forecast, request.query.data.id];
-              client.query(SQL, values);
-              return(weatherObject);
-            })
+          .then(forecastData => {
+            let weeklyForecast = forecastData.body.daily.data.map( forecast => {
+              let weatherObject = {};
+              weatherObject.forecast = forecast.summary;
+              weatherObject.time = new Date(forecast.time * 1000).toDateString();
+              // SQL = `INSERT INTO weathers (time, forecast, location_id) VALUES($1, $2, $3)`;
+              // values = [weatherObject.time, weatherObject.forecast, request.query.data.id];
+              // client.query(SQL, values);
+              return weatherObject;
+              
+            });
 
+            weeklyForecast.forEach(forecast => {
+              SQL = `INSERT INTO weathers (forecast, time, created_at, location_id) VALUES($1, $2, $3, $4)`;
+              const values = [forecast.forecast, forecast.time, Date.now(), query.id]
+              client.query(SQL, values)
+                .catch(err => {
+                  console.error(err);
+                });
+            })
+            return weeklyForecast;
             //normalize the data
-            response.status(200).send(weeklyForecast);
+            // response.status(200).send(weeklyForecast);
 
           })
           .catch(err => {
             console.error(err);
-            response.send(err)
+            
           })
+      } else {
+        console.log('found in weather in DB');
+        if(Date.now() - data.rows[0].created_at > timeOuts.weather){
+          console.log('data too old');
+          const SQL = 'DELET FROM weathers WHERE location_id=$1'
+          const values = [query.id];
+
+          return client.query(SQL, values)
+            .then(() => {
+              return superagent.get(URL)
+                .then(forecastData => {
+                  let weeklyForecast = forecastData.body.daily.data.map(forecast => {
+                    let weatherObject = [];
+                    weatherObject.forecast = forecast.summary;
+                    weatherObject.time = new Date(forecast.time * 1000).toDateString();
+                    return weatherObject;
+                  });
+
+                  weeklyForecast.forEach(forecast => {
+                    console.log('storing a forecast');
+                    const SQL = `INSERT INTO weathers (time, forecast, created_at location_id) VALUES($1, $2, $3, $4)`;
+                    const values = [forecast.forecast, forecast.time, Date.now(), query.id]
+                    client.query(SQL, values)
+                    .catch(err => {
+                   console.error(err);
+                   });
+                })
+                     return weeklyForecast;
+                  })
+                })
+          
+        }
+          return data.rows;
       }
+      
     })
-    .catch(err => {
+  }
+
+  app.get('/yelp', (request, response) => {
+    searchRestaurants(request.query.data)
+    .then(yelpData => {
+      response.send(yelpData);
+    }).catch(err => {
+      console.log('HEY YOU!');
       console.error(err);
-      response.send(err)
     })
-})
+  });
+
+  function searchRestaurants (query){
+    const yelpUrl = `https://api.yelp.com/v3/businesses/search?term=restaurants&latitude=${query.latitude}&longitude=${query.longitude}&limit=20`;
+    const SQL = 'SELECT * FROM restaurants WHERE location_id=$1';
+    return client.query(SQL, [query.id])
+      .then(result => {
+
+        if(!result.rowCount){
+          console.log('calling restuarants from api');
+          return superagent.get(yelpUrl)
+          .set('Authorization', `Bearer ${process.env.YELP_API_KEY}`)
+            .then(yelpData => {
+              let yelpDataArr = foodData.body.businesses.map(business => {
+              let yelpObject = [];
+              yelpObject.name = business.name;
+              yelpObject.image_url= business.image_url;
+              yelpObject.price = business.price;
+              yelpObject.rating = business.rating;
+              yelpObject.time = new Date(business.time * 1000).toDateString();
+              return yelpObject;
+
+              });
+              yelpDataArr.forEach(business => {
+                console.log('storing businesses');
+                const SQL = `INSERT INTO restaurants (name, image_url, price, rating, url, time, location_id) VALUES($1, $2, $3, $4, $5, $6, $7)`;
+                const values = [business.name, business.image_url, business.price, business.rating, business.url, business.time]
+                client.query(SQL, values)
+                  .catch(err => {
+                    console.log('hey we are there')
+                    console.error(err);
+                  });
+              })
+              return yelpDataArr;
+            }) .catch(err => {
+              console.log('restuarants')
+            })
+
+        } else {
+          console.log('is this evn working');
+          if(Date.now() - result.rows[0].created_at > timeOuts.yelp)
+          console.log('it is too old');
+          const SQL = 'DELETE FROM restuarants WHERE location_id=$1'
+          const values=[query.id];
+
+          return client.query(SQL, values)
+            .then(() => {
+              stopped here!
+            })
+        }
+      
+      })
+
+  }
 
 // New SQL for Yelp
 
-app.get('/yelp', (request, response) => {
-  let SQL = 'SELECT * FROM restaurants WHERE location_id=$1';
-  let values = [request.query.data.id];
-  client.query(SQL, values)
+// app.get('/yelp', (request, response) => {
+//   let SQL = 'SELECT * FROM restaurants WHERE location_id=$1';
+//   let values = [request.query.data.id];
+//   client.query(SQL, values)
 
-    .then(data =>{
-      if(data.rowCount > 0){ //cache hit
-        console.log('Restaurants retrieved from database')
-        response.status(200).send(data.rows);
-      } else { //cache miss
-        let yelpData = `https://api.yelp.com/v3/businesses/search?term=restaurants&latitude=${request.query.data.latitude}&longitude=${request.query.data.longitude}&limit=20`;
+//     .then(data =>{
+//       if(data.rowCount > 0){ //cache hit
+//         console.log('Restaurants retrieved from database')
+//         response.status(200).send(data.rows);
+//       } else { //cache miss
+//         let yelpData = `https://api.yelp.com/v3/businesses/search?term=restaurants&latitude=${request.query.data.latitude}&longitude=${request.query.data.longitude}&limit=20`;
 
-        return superagent.get(yelpData)
-          // This .set() adds our API KEY
-          .set('Authorization', `Bearer ${process.env.YELP_API_KEY}`)
-          .then( foodData => {
-            let restaurantData = foodData.body.businesses.map( business => {
-              let restaurantObject = new Restaurant(business);
-              let SQL = `INSERT INTO restaurants (name, image_url, price, rating, url, location_id) VALUES($1, $2, $3, $4, $5, $6)`;
-              let values = [restaurantObject.name, restaurantObject.image_url, restaurantObject.price, restaurantObject.rating, restaurantObject.url, request.query.data.id];
-              client.query(SQL, values);
-              return(restaurantObject);
-            })
-            //normalize the data
-            response.status(200).send(restaurantData);
-          })
+//         return superagent.get(yelpData)
+//           // This .set() adds our API KEY
+//           .set('Authorization', `Bearer ${process.env.YELP_API_KEY}`)
+//           .then( foodData => {
+//             let restaurantData = foodData.body.businesses.map( business => {
+//               let restaurantObject = new Restaurant(business);
+//               let SQL = `INSERT INTO restaurants (name, image_url, price, rating, url, location_id) VALUES($1, $2, $3, $4, $5, $6)`;
+//               let values = [restaurantObject.name, restaurantObject.image_url, restaurantObject.price, restaurantObject.rating, restaurantObject.url, request.query.data.id];
+//               client.query(SQL, values);
+//               return(restaurantObject);
+//             })
+//             //normalize the data
+//             response.status(200).send(restaurantData);
+//           })
 
-          .catch(err => {
-            console.error(err);
-            response.send(err)
-          })
-        }
-    })
-    .catch(err => {
-      console.error(err);
-      response.send(err)
-    })
-})
+//           .catch(err => {
+//             console.error(err);
+//             response.send(err)
+//           })
+//         }
+//     })
+//     .catch(err => {
+//       console.error(err);
+//       response.send(err)
+//     })
+// })
 
 //New SQL for Movies
 

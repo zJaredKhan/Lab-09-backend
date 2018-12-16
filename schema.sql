@@ -15,6 +15,7 @@ CREATE TABLE weathers (
   id SERIAL PRIMARY KEY,
   forecast VARCHAR (255),
   time VARCHAR (255),
+  created_at NUMERIC,
   location_id INTEGER NOT NULL,
   FOREIGN KEY (location_id) REFERENCES locations(id)
 );
@@ -26,6 +27,7 @@ CREATE TABLE restaurants (
   price VARCHAR (4),
   rating NUMERIC (8,2),
   url VARCHAR (500),
+  time VARCHAR (255),
   location_id INTEGER NOT NULL,
   FOREIGN KEY (location_id) REFERENCES locations(id)
 );
