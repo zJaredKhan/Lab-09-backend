@@ -58,39 +58,39 @@ function lookForLocation(query, handler) {
     .then(data => { //then if we have it, send it back
       if(data.rowCount){
         console.log('Location retrieved from database')
-       handler.cacheHit(data.rows[0]);
+        handler.cacheHit(data.rows[0]);
       } else {//otherwise, get it from google
         handler.cacheMiss(query);
-      } 
-    }).catch(err => console.error(err));
       }
+    }).catch(err => console.error(err));
+}
 
 function searchLocation(query){
   const URL = `https://maps.googleapis.com/maps/api/geocode/json?address=${query}&key=${process.env.GEOCODE_API_KEY}`;
 
-       return superagent.get(URL)
-         .then(result => {
-           console.log('Location retrieved from Google')
+  return superagent.get(URL)
+    .then(result => {
+      console.log('Location retrieved from Google')
 
-           //then normalize it
-           let location = new Location(result.body.results[0]);
-           let SQL = `INSERT INTO locations (search_query, formatted_query, latitude, longitude) VALUES($1, $2, $3, $4) RETURNING id`;
-           
+      //then normalize it
+      let location = new Location(result.body.results[0]);
+      let SQL = `INSERT INTO locations (search_query, formatted_query, latitude, longitude) VALUES($1, $2, $3, $4) RETURNING id`;
 
-           //store it in our DB
-           return client.query(SQL, [query, location.formatted_query, location.latitude, location.longitude])
-             .then((result) =>{
-               console.log(result);
-               console.log('stored to DB');
-               location.id = result.rows[0].id
-               return location;
-               //then send it back
-           
-   })
-   .catch(err => 
-     console.error(err));
-   
-   });
+
+      //store it in our DB
+      return client.query(SQL, [query, location.formatted_query, location.latitude, location.longitude])
+        .then((result) =>{
+          console.log(result);
+          console.log('stored to DB');
+          location.id = result.rows[0].id
+          return location;
+          //then send it back
+
+        })
+        .catch(err =>
+          console.error(err));
+
+    });
 }
 
 
@@ -98,12 +98,12 @@ function searchLocation(query){
 
 app.get('/weather', (request, response) => {
   searchWeather(request.query.data)
-  .then(forecastData => {
-    response.send(forecastData);
-  }).catch(err => {
-    console.log('HEY YOU!');
-    console.error(err);
-  })
+    .then(forecastData => {
+      response.send(forecastData);
+    }).catch(err => {
+      console.log('HEY YOU!');
+      console.error(err);
+    })
 });
 
 function getWeather(request, response) {
@@ -114,17 +114,17 @@ function getWeather(request, response) {
       let result = data.rows
       response.status(200).send(result);
     },
-      cacheMiss: (name, latitude, longitude, id) => {
-        return searchWeather(name, latitude, longitude, id)
-          .then(result => {
-            response.send(result);
-          })
-            .catch(error => console.log(error));
-      },
+    cacheMiss: (name, latitude, longitude, id) => {
+      return searchWeather(name, latitude, longitude, id)
+        .then(result => {
+          response.send(result);
+        })
+        .catch(error => console.log(error));
+    },
 
   };
-    let query = request.query.data;
-    searchHandler(query.formatted_query, query.latitude, query.longitude, query.id, 'weather', searchHandler);
+  let query = request.query.data;
+  searchHandler(query.formatted_query, query.latitude, query.longitude, query.id, 'weather', searchHandler);
 }
 
 function searchWeather(query){
@@ -137,8 +137,8 @@ function searchWeather(query){
     .then(data =>{
       if(!data.rowCount){ //cache hit
         console.log('Weather retrieved from Api')
-       //cache miss
-        
+        //cache miss
+
         return superagent.get(URL)
           .then(forecastData => {
             let weeklyForecast = forecastData.body.daily.data.map( forecast => {
@@ -149,7 +149,7 @@ function searchWeather(query){
               // values = [weatherObject.time, weatherObject.forecast, request.query.data.id];
               // client.query(SQL, values);
               return weatherObject;
-              
+
             });
 
             weeklyForecast.forEach(forecast => {
@@ -167,7 +167,7 @@ function searchWeather(query){
           })
           .catch(err => {
             console.error(err);
-            
+
           })
       } else {
         console.log('found in weather in DB');
@@ -192,51 +192,54 @@ function searchWeather(query){
                     const SQL = `INSERT INTO weathers (time, forecast, created_at, location_id) VALUES($1, $2, $3, $4)`;
                     const values = [forecast.forecast, forecast.time, Date.now(), query.id]
                     client.query(SQL, values)
-                    .catch(err => {
-                   console.error(err);
-                   });
-                })
-                     return weeklyForecast;
+                      .catch(err => {
+                        console.error(err);
+                      });
                   })
+                  return weeklyForecast;
                 })
-          
+            })
+
         }
-          return data.rows;
+        return data.rows;
       }
-      
+
     })
-  }
+}
 
-  // app.get('/yelp', (request, response) => {
-  //   searchRestaurants(request.query.data)
-  //   .then(yelpData => {
-  //     response.send(yelpData);
-  //   }).catch(err => {
-  //     console.log('HEY YOU!');
-  //     console.error(err);
-  //   })
-  // });
+app.get('/trails', getTrails);
+app.get('/meetups', getMeetups);
 
-  // //Yelp
-  // function getRestuarants(request, response){
-  //   let searchHandler = {
-  //     cacheHit: (data) => {
-  //       console.log('Yelp retrieved from DB');
-  //       let result = data.rows;
+// app.get('/yelp', (request, response) => {
+//   searchRestaurants(request.query.data)
+//   .then(yelpData => {
+//     response.send(yelpData);
+//   }).catch(err => {
+//     console.log('HEY YOU!');
+//     console.error(err);
+//   })
+// });
 
-  //       response.status(200).send(result);
-  //     },
-  //       cacheMiss: (name, latitude, longitude, id) => {
-  //         return searchRestaurants(name, latitude, longitude, id)
-  //           .then(result => {
-  //             response.send(result);
-  //           })
-  //             .catch(error => console.log(error));
-  //       },
-  //   };
-  //   let query = request.query.data;
-  //   searchHandler(query.formatted_query, query.latitude, query.longitude, query.id, 'restuarants', searchHandler);
-  // }
+// //Yelp
+// function getRestuarants(request, response){
+//   let searchHandler = {
+//     cacheHit: (data) => {
+//       console.log('Yelp retrieved from DB');
+//       let result = data.rows;
+
+//       response.status(200).send(result);
+//     },
+//       cacheMiss: (name, latitude, longitude, id) => {
+//         return searchRestaurants(name, latitude, longitude, id)
+//           .then(result => {
+//             response.send(result);
+//           })
+//             .catch(error => console.log(error));
+//       },
+//   };
+//   let query = request.query.data;
+//   searchHandler(query.formatted_query, query.latitude, query.longitude, query.id, 'restuarants', searchHandler);
+// }
 
 // New SQL for Yelp
 
@@ -271,7 +274,7 @@ app.get('/yelp', (request, response) => {
             console.error(err);
             response.send(err)
           })
-        }
+      }
     })
     .catch(err => {
       console.error(err);
@@ -320,8 +323,8 @@ app.get('/yelp', (request, response) => {
 //             //normalize the data
 //             response.status(200).send(restaurantData);
 //           });
-      
-  
+
+
 
 //     .catch(err => {
 //       console.error(err);
@@ -405,6 +408,66 @@ function movieHandler (query) {
     });
 }
 
+function getMeetups(req, res) {
+  const meetupOptions = {
+    tableName: Meetup.tableName,
+
+    location: req.query.data.id,
+
+    timeout: timeOuts.meetup,
+
+    cacheHit: function(result) {
+      res.send(result.rows);
+    },
+
+    cacheMiss: function() {
+      const url = `https://api.meetup.com/find/groups?location=${req.query.data.search_query}&page=20&key=${process.env.MEETUP_API_KEY}`;
+
+      superagent.get(url)
+        .then(results => {
+          const meetupSummaries = results.body.map(meetup => {
+            const summary = new Meetup(meetup);
+            summary.save(req.query.data.id);
+            return summary;
+          });
+          res.send(meetupSummaries);
+        })
+        .catch(err => handleError(err, res));
+    }
+  };
+  Meetup.lookup(meetupOptions);
+}
+
+function getTrails(req, res) {
+  const trailOptions = {
+    tableName: Trail.tableName,
+
+    location: req.query.data.id,
+
+    timeout: timeouts.trail,
+
+    cacheHit: function(result) {
+      res.send(result.rows);
+    },
+
+    cacheMiss: function() {
+      const url = `https://www.hikingproject.com/data/get-trails?lat=${req.query.data.latitude}&lon=${req.query.data.longitude}&key=${process.env.TRAILS_API_KEY}`;
+
+      superagent.get(url)
+        .then(results => {
+          const trailSummaries = results.body.trails.map(trail => {
+            const summary = new Trail(trail);
+            summary.save(req.query.data.id);
+            return summary;
+          });
+          res.send(trailSummaries);
+        })
+        .catch(err => handleError(err, res));
+    }
+  };
+  Trail.lookup(trailOptions);
+}
+
 // Constructors
 
 function Location (location, query) {
@@ -439,15 +502,82 @@ function Film (video) {
 
 }
 
-function Meetup (meetup) {
+function Trail(trail) {
+  this.name = trail.name;
+  this.location = trail.location;
+  this.length = trail.length;
+  this.stars = trail.stars;
+  this.star_votes = trail.starVotes;
+  this.summary = trail.summary;
+  this.trail_url = trail.url;
+  this.conditions = trail.conditionStatus;
+  this.condition_date = trail.conditionDate.split(' ')[0];
+  this.condition_time = trail.conditionDate.split(' ')[1];
+}
+function Meetup(meetup) {
   this.link = meetup.link;
   this.name = meetup.name;
-  this.created_date = meetup.created_date;
-  this.host = meetup.host;
+  this.creation_date = new Date(meetup.created).toDateString();
+  this.host = meetup.organizer.name;
+}
+Meetup.tableName = 'meetups';
+Meetup.lookup = lookup;
+Meetup.prototype = {
+  save: function(location_id) {
+    const SQL = `INSERT INTO ${Meetup.tableName} (link, name, creation_date, host, created_at, location_id) VALUES ($1, $2, $3, $4, $5, $6);`;
+    const values = [this.link, this.name, this.creation_date, this.host, Date.now(), location_id];
+    client.query(SQL, values);
+  }
+}
 
+Trail.tableName = 'trails';
+Trail.lookup = lookup;
+Trail.prototype = {
+  save: function(location_id) {
+    const SQL = `INSERT INTO ${Trail.tableName} (name, location, length, stars, star_votes, summary, trail_url, conditions, condition_date, condition_time, created_at, location_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12);`;
+    const values = [this.name, this.location, this.length, this.stars, this.star_votes, this.summary, this.trail_url, this.conditions, this.condition_date, this.condition_time, Date.now(), location_id];
+
+    client.query(SQL, values);
+  }
+}
+
+// Gobal lookup function except for location
+function lookup(options) {
+  const SQL = `SELECT * FROM ${options.tableName} WHERE location_id=$1;`;
+  const values = [options.location];
+
+  client.query(SQL, values)
+    .then(result => {
+      if (result.rowCount > 0) {
+        if (Date.now() - result.rows[0].created_at > options.timeout) {
+          deleteRows(options);
+        } else {
+          options.cacheHit(result);
+        }
+      } else {
+        options.cacheMiss();
+      }
+    })
+    .catch(error => handleError(error));
+}
+
+// Global delete function
+function deleteRows(options) {
+  const SQL = `DELETE FROM ${options.tableName} WHERE location_id=$1;`;
+  const values = [options.location];
+  console.log(`cache invalid - deleting rows in ${options.tableName}`)
+
+  client.query(SQL, values)
+    .then(() => {
+      options.cacheMiss();
+    })
+    .catch(err => handleError(err));
 }
 // Checks
 
 app.listen(PORT, () => {
   console.log('app is up on port 3000');
 });
+
+
+//
