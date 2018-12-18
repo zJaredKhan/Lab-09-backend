@@ -10,7 +10,8 @@ const pg = require('pg');
 const timeOuts = {
   weather: 15 * 1000,
   meetups: 60 * 60 * 24 * 1000,
-  hiking: 30 * 60 * 60 * 24 * 1000
+  hiking: 30 * 60 * 60 * 24 * 1000,
+  yelp: 60 * 24 * 1000
 }
 
 require('dotenv').config();
@@ -50,7 +51,6 @@ function getLocation(request, response){
 app.get('/location', getLocation);
 
 function lookForLocation(query, handler) {
-  // let query = request.query.data;
   const SQL = 'SELECT * FROM locations WHERE search_query=$1';
   const values = [query];
   console.log(values);
@@ -97,43 +97,146 @@ function searchLocation(query){
 // New SQL for weather
 
 app.get('/weather', (request, response) => {
-  let SQL = 'SELECT * FROM  weathers WHERE location_id=$1';
-  let values = [request.query.data.id];
-  client.query(SQL, values)
+  searchWeather(request.query.data)
+  .then(forecastData => {
+    response.send(forecastData);
+  }).catch(err => {
+    console.log('HEY YOU!');
+    console.error(err);
+  })
+});
 
+function getWeather(request, response) {
+  let searchHandler = {
+    cacheHit: (data) => {
+      console.log('Weather retrieved from DB');
+
+      let result = data.rows
+      response.status(200).send(result);
+    },
+      cacheMiss: (name, latitude, longitude, id) => {
+        return searchWeather(name, latitude, longitude, id)
+          .then(result => {
+            response.send(result);
+          })
+            .catch(error => console.log(error));
+      },
+
+  };
+    let query = request.query.data;
+    searchHandler(query.formatted_query, query.latitude, query.longitude, query.id, 'weather', searchHandler);
+}
+
+function searchWeather(query){
+  const URL = `https://api.darksky.net/forecast/${process.env.DARKSKY_API_KEY}/${query.latitude},${query.longitude}`;
+
+  let SQL = 'SELECT * FROM  weathers WHERE location_id=$1';
+  // let values = [request.query.data.id];
+  return client.query(SQL, [query.id])
 
     .then(data =>{
-      if(data.rowCount > 0){ //cache hit
-        console.log('Weather retrieved from database')
-        response.status(200).send(data.rows);
-      } else { //cache miss
-        const URL = `https://api.darksky.net/forecast/${process.env.DARKSKY_API_KEY}/${request.query.data.latitude},${request.query.data.longitude}`;
-
+      if(!data.rowCount){ //cache hit
+        console.log('Weather retrieved from Api')
+       //cache miss
+        
         return superagent.get(URL)
-          .then( forecastData => {
-            let weeklyForecast = forecastData.body.daily.data.map( oneDay => {
-              let weatherObject = new Forecast(oneDay);
-              SQL = `INSERT INTO weathers (time, forecast, location_id) VALUES($1, $2, $3)`;
-              values = [weatherObject.time, weatherObject.forecast, request.query.data.id];
-              client.query(SQL, values);
-              return(weatherObject);
-            })
+          .then(forecastData => {
+            let weeklyForecast = forecastData.body.daily.data.map( forecast => {
+              let weatherObject = {};
+              weatherObject.forecast = forecast.summary;
+              weatherObject.time = new Date(forecast.time * 1000).toDateString();
+              // SQL = `INSERT INTO weathers (time, forecast, location_id) VALUES($1, $2, $3)`;
+              // values = [weatherObject.time, weatherObject.forecast, request.query.data.id];
+              // client.query(SQL, values);
+              return weatherObject;
+              
+            });
 
+            weeklyForecast.forEach(forecast => {
+              SQL = `INSERT INTO weathers (forecast, time, created_at, location_id) VALUES($1, $2, $3, $4)`;
+              const values = [forecast.forecast, forecast.time, Date.now(), query.id]
+              client.query(SQL, values)
+                .catch(err => {
+                  console.error(err);
+                });
+            })
+            return weeklyForecast;
             //normalize the data
-            response.status(200).send(weeklyForecast);
+            // response.status(200).send(weeklyForecast);
 
           })
           .catch(err => {
             console.error(err);
-            response.send(err)
+            
           })
+      } else {
+        console.log('found in weather in DB');
+        if(Date.now() - data.rows[0].created_at > timeOuts.weather){
+          console.log('data too old');
+          const SQL = 'DELETE FROM weathers WHERE location_id=$1';
+          const values = [query.id];
+
+          return client.query(SQL, values)
+            .then(() => {
+              return superagent.get(URL)
+                .then(forecastData => {
+                  let weeklyForecast = forecastData.body.daily.data.map(forecast => {
+                    let weatherObject = [];
+                    weatherObject.forecast = forecast.summary;
+                    weatherObject.time = new Date(forecast.time * 1000).toDateString();
+                    return weatherObject;
+                  });
+
+                  weeklyForecast.forEach(forecast => {
+                    console.log('storing a forecast');
+                    const SQL = `INSERT INTO weathers (time, forecast, created_at, location_id) VALUES($1, $2, $3, $4)`;
+                    const values = [forecast.forecast, forecast.time, Date.now(), query.id]
+                    client.query(SQL, values)
+                    .catch(err => {
+                   console.error(err);
+                   });
+                })
+                     return weeklyForecast;
+                  })
+                })
+          
+        }
+          return data.rows;
       }
+      
     })
-    .catch(err => {
-      console.error(err);
-      response.send(err)
-    })
-})
+  }
+
+  // app.get('/yelp', (request, response) => {
+  //   searchRestaurants(request.query.data)
+  //   .then(yelpData => {
+  //     response.send(yelpData);
+  //   }).catch(err => {
+  //     console.log('HEY YOU!');
+  //     console.error(err);
+  //   })
+  // });
+
+  // //Yelp
+  // function getRestuarants(request, response){
+  //   let searchHandler = {
+  //     cacheHit: (data) => {
+  //       console.log('Yelp retrieved from DB');
+  //       let result = data.rows;
+
+  //       response.status(200).send(result);
+  //     },
+  //       cacheMiss: (name, latitude, longitude, id) => {
+  //         return searchRestaurants(name, latitude, longitude, id)
+  //           .then(result => {
+  //             response.send(result);
+  //           })
+  //             .catch(error => console.log(error));
+  //       },
+  //   };
+  //   let query = request.query.data;
+  //   searchHandler(query.formatted_query, query.latitude, query.longitude, query.id, 'restuarants', searchHandler);
+  // }
 
 // New SQL for Yelp
 
@@ -336,6 +439,13 @@ function Film (video) {
 
 }
 
+function Meetup (meetup) {
+  this.link = meetup.link;
+  this.name = meetup.name;
+  this.created_date = meetup.created_date;
+  this.host = meetup.host;
+
+}
 // Checks
 
 app.listen(PORT, () => {
